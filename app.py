@@ -42,6 +42,10 @@ def set_intercom_status(admin_id, is_away):
         print(f"❌ Erro no Intercom: {e}")
         return False
 
+@app.route('/', methods=['GET'])
+def home():
+    return "A automação está online e rodando! 🚀"
+
 # rota do webhook.. eh aqui q o aircall bate qdo o telefone toca
 @app.route('/webhook-aircall', methods=['POST'])
 def aircall_hook():
