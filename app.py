@@ -14,7 +14,6 @@ AGENTS_MAP = {
     "rhayslla.junca@produttivo.com.br": "5281911",
     "douglas.david@produttivo.com.br": "5586698",
     "aline.souza@produttivo.com.br": "5717251",
-    "willian.aust@produttivo.com.br": "7152911",
     "bruno.braga@produttivo.com.br": "7450383",
     "heloisa.atm.slv@produttivo.com.br": "7455039",
     "danielle.ghesini@produttivo.com.br": "7628368",
