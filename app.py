@@ -5,6 +5,8 @@ import os
 app = Flask(__name__)
 
 INTERCOM_TOKEN = os.environ.get("INTERCOM_TOKEN")
+SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
+LIDERANCA_TAGS = "<@U06KNLC1Y9F> <@U08CZ58DDAA>"
 
 if not INTERCOM_TOKEN:
     print("⚠️ AVISO: Token do Intercom não encontrado nas variáveis de ambiente!")
@@ -41,6 +43,17 @@ def set_intercom_status(admin_id, is_away):
         print(f"❌ Erro no Intercom: {e}")
         return False
 
+# --- FUNÇÃO DO SLACK (Envia notificação)
+def send_slack_msg(message):
+    if not SLACK_WEBHOOK:
+        return # Se não tiver link configurado, não faz nada
+        
+    try:
+        requests.post(SLACK_WEBHOOK, json={"text": message})
+        print("✅ Notificação enviada para o Slack")
+    except Exception as e:
+        print(f"⚠️ Erro ao enviar para Slack: {e}")
+
 @app.route('/', methods=['GET'])
 def home():
     return "A automação está online e rodando! 🚀"
@@ -69,16 +82,25 @@ def aircall_hook():
         print(f"⚠️ Agente não mapeado: {agent_email}")
         return jsonify({"status": "ignored"}), 200
 
-    # LOGICA PRINCIPAL:
-    # call.answered: o cara atendeu a ligacao? joga pra AUSENTE na hora
+# 1. ATENDEU A LIGAÇÃO
     if event_type == 'call.answered':
-        print(f"📞 Ligação atendida por {agent_email}. Mudando para Ausente...")
-        set_intercom_status(admin_id, True)
+        print(f"📞 {agent_name} atendeu.")
+        
+        # Muda status no Intercom
+        if set_intercom_status(admin_id, True):
+            # Manda mensagem no Slack marcando os dois líderes
+            msg = f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação e está *Ausente*."
+            send_slack_msg(msg)
 
-    # call.ended: desligou? libera o status e volta pra ONLINE
+    # 2. DESLIGOU A LIGAÇÃO
     elif event_type == 'call.ended':
-        print(f"☎️ Ligação finalizada por {agent_email}. Voltando para Online...")
-        set_intercom_status(admin_id, False)
+        print(f"☎️ {agent_name} desligou.")
+        
+        # Volta status no Intercom
+        if set_intercom_status(admin_id, False):
+            # Avisa no Slack (sem marcar liderança, para não gerar spam desnecessário)
+            msg = f"🟢 *{agent_name}* finalizou a ligação e está *Online* novamente."
+            send_slack_msg(msg)
 
     return jsonify({"status": "success"}), 200
 
