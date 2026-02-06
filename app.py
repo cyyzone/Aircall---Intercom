@@ -6,10 +6,14 @@ app = Flask(__name__)
 
 # --- CONFIGURAÇÕES ---
 INTERCOM_TOKEN = os.environ.get("INTERCOM_TOKEN")
-SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
 
-# --- LIDERANÇA A SER MARCADA ---
-# Seus IDs configurados
+# CANAL 1: Onde a liderança será marcada (Use a variável SLACK_WEBHOOK_1 no Render)
+WEBHOOK_LIDERANCA = os.environ.get("SLACK_WEBHOOK_1")
+
+# CANAL 2: Apenas aviso, sem marcar ninguém (Use a variável SLACK_WEBHOOK_2 no Render)
+WEBHOOK_GERAL = os.environ.get("SLACK_WEBHOOK_2")
+
+# IDs para marcar (Apenas no Canal 1)
 LIDERANCA_TAGS = "<@U06KNLC1Y9F> <@U08CZ58DDAA>"
 
 AGENTS_MAP = {
@@ -20,7 +24,7 @@ AGENTS_MAP = {
     "heloisa.atm.slv@produttivo.com.br": "7455039",
     "danielle.ghesini@produttivo.com.br": "7628368",
     "jenyffer.souza@produttivo.com.br": "8115775",
-    "marcelo.misugi@produttivo.com.br": "8126602",
+    "marcelo.misugi@produttivo.com.br": "8126602"
 }
 
 # --- FUNÇÃO DO INTERCOM ---
@@ -41,63 +45,58 @@ def set_intercom_status(admin_id, is_away):
         print(f"❌ Erro no Intercom: {e}")
         return False
 
-# --- FUNÇÃO DO SLACK ---
-def send_slack_msg(message):
-    if not SLACK_WEBHOOK:
-        return 
-        
+# --- FUNÇÃO DE ENVIO SIMPLES ---
+def enviar_para_slack(url, mensagem):
+    if not url:
+        return # Se o link não existir, não faz nada
     try:
-        requests.post(SLACK_WEBHOOK, json={"text": message})
-        print("✅ Notificação enviada para o Slack")
+        requests.post(url, json={"text": mensagem})
     except Exception as e:
-        print(f"⚠️ Erro ao enviar para Slack: {e}")
+        print(f"⚠️ Erro ao enviar Slack: {e}")
 
 # --- ROTA DO WEBHOOK ---
 @app.route('/webhook-aircall', methods=['POST'])
 def aircall_hook():
     data = request.json
     
-    # Validações básicas
-    if not data or 'event' not in data:
-        return jsonify({"status": "ignored"}), 200
-
+    if not data or 'event' not in data: return jsonify({"status": "ignored"}), 200
     event_type = data['event']
     user = data.get('data', {}).get('user')
-    
-    if not user:
-        return jsonify({"status": "ignored", "reason": "No agent data"}), 200
+    if not user: return jsonify({"status": "ignored"}), 200
 
     agent_email = user.get('email')
-    
-    # --- A CORREÇÃO ESTÁ AQUI EMBAIXO ---
-    # Essa linha define o nome antes de ser usada. 
-    # Se o nome não vier no json, ele pega a primeira parte do email.
     agent_name = user.get('name', agent_email.split('.')[0].capitalize())
     
     admin_id = AGENTS_MAP.get(agent_email)
 
-    if not admin_id:
-        print(f"⚠️ Agente não mapeado: {agent_email}")
-        return jsonify({"status": "ignored"}), 200
+    if not admin_id: return jsonify({"status": "ignored"}), 200
 
-    # --- LÓGICA PRINCIPAL ---
+    # --- LÓGICA DE ENVIO SEPARADA ---
     
     # 1. ATENDEU A LIGAÇÃO
     if event_type == 'call.answered':
-        # Agora a variável agent_name existe e não vai dar erro
         print(f"📞 {agent_name} atendeu.")
         
         if set_intercom_status(admin_id, True):
-            msg = f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação e está *Ausente*."
-            send_slack_msg(msg)
+            
+            # MENSAGEM 1 (COM MARCAÇÃO) -> Vai para o Canal de Liderança
+            msg_com_tag = f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação e está *Ausente*."
+            enviar_para_slack(WEBHOOK_LIDERANCA, msg_com_tag)
+
+            # MENSAGEM 2 (LIMPA) -> Vai para o Canal Geral
+            msg_sem_tag = f"🔴 *{agent_name}* entrou em ligação e está *Ausente*."
+            enviar_para_slack(WEBHOOK_GERAL, msg_sem_tag)
 
     # 2. DESLIGOU A LIGAÇÃO
     elif event_type == 'call.ended':
         print(f"☎️ {agent_name} desligou.")
         
         if set_intercom_status(admin_id, False):
-            msg = f"🟢 *{agent_name}* finalizou a ligação e está *Online* novamente."
-            send_slack_msg(msg)
+            # Aviso de volta (Online) geralmente não precisa marcar ninguém em nenhum canal
+            msg_online = f"🟢 *{agent_name}* finalizou a ligação e está *Online* novamente."
+            
+            enviar_para_slack(WEBHOOK_LIDERANCA, msg_online)
+            enviar_para_slack(WEBHOOK_GERAL, msg_online)
 
     return jsonify({"status": "success"}), 200
 
