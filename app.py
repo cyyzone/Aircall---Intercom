@@ -1,19 +1,15 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
 # --- CONFIGURAÇÕES ---
 INTERCOM_TOKEN = os.environ.get("INTERCOM_TOKEN")
-
-# CANAL 1: Onde a liderança será marcada (Use a variável SLACK_WEBHOOK_1 no Render)
 WEBHOOK_LIDERANCA = os.environ.get("SLACK_WEBHOOK_1")
-
-# CANAL 2: Apenas aviso, sem marcar ninguém (Use a variável SLACK_WEBHOOK_2 no Render)
 WEBHOOK_GERAL = os.environ.get("SLACK_WEBHOOK_2")
 
-# IDs para marcar (Apenas no Canal 1)
 LIDERANCA_TAGS = "<@U06KNLC1Y9F> <@U08CZ58DDAA>"
 
 AGENTS_MAP = {
@@ -27,7 +23,10 @@ AGENTS_MAP = {
     "marcelo.misugi@produttivo.com.br": "8126602"
 }
 
-# --- FUNÇÃO DO INTERCOM ---
+# Função auxiliar para pegar hora certa no log
+def hora_atual():
+    return datetime.now().strftime("%H:%M:%S")
+
 def set_intercom_status(admin_id, is_away):
     url = f"https://api.intercom.io/admins/{admin_id}/away"
     headers = {
@@ -42,61 +41,77 @@ def set_intercom_status(admin_id, is_away):
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
-        print(f"❌ Erro no Intercom: {e}")
+        print(f"[{hora_atual()}] ❌ Erro ao conectar com Intercom: {e}")
         return False
 
-# --- FUNÇÃO DE ENVIO SIMPLES ---
-def enviar_para_slack(url, mensagem):
-    if not url:
-        return # Se o link não existir, não faz nada
+def enviar_para_slack(url, mensagem, canal_nome):
+    if not url: return
     try:
         requests.post(url, json={"text": mensagem})
+        # LOG DE SUCESSO DO SLACK
+        print(f"[{hora_atual()}] 💬 Slack enviado para {canal_nome}.")
     except Exception as e:
-        print(f"⚠️ Erro ao enviar Slack: {e}")
+        print(f"[{hora_atual()}] ⚠️ Erro ao enviar Slack ({canal_nome}): {e}")
 
-# --- ROTA DO WEBHOOK ---
 @app.route('/webhook-aircall', methods=['POST'])
 def aircall_hook():
     data = request.json
     
-    if not data or 'event' not in data: return jsonify({"status": "ignored"}), 200
+    if not data or 'event' not in data:
+        # Log simples para ignorar spam vazio
+        return jsonify({"status": "ignored"}), 200
+
     event_type = data['event']
+    
+    # Filtra logs para não poluir com eventos inúteis (tocando, criado, etc)
+    if event_type not in ['call.answered', 'call.ended']:
+        return jsonify({"status": "ignored"}), 200
+
     user = data.get('data', {}).get('user')
     if not user: return jsonify({"status": "ignored"}), 200
 
     agent_email = user.get('email')
     agent_name = user.get('name', agent_email.split('.')[0].capitalize())
-    
     admin_id = AGENTS_MAP.get(agent_email)
 
-    if not admin_id: return jsonify({"status": "ignored"}), 200
+    if not admin_id:
+        print(f"[{hora_atual()}] 🚫 Ignorado: Agente não mapeado ({agent_email})")
+        return jsonify({"status": "ignored"}), 200
 
-    # --- LÓGICA DE ENVIO SEPARADA ---
+    # --- LÓGICA DETALHADA ---
     
-    # 1. ATENDEU A LIGAÇÃO
     if event_type == 'call.answered':
-        print(f"📞 {agent_name} atendeu.")
+        print(f"[{hora_atual()}] 📞 {agent_name} ATENDEU. Iniciando processos...")
         
+        # 1. Tenta mudar Intercom
         if set_intercom_status(admin_id, True):
+            # LOG DE SUCESSO INTERCOM
+            print(f"[{hora_atual()}] ✅ Status Intercom alterado para: AUSENTE")
             
-            # MENSAGEM 1 (COM MARCAÇÃO) -> Vai para o Canal de Liderança
+            # 2. Envia Slack Liderança
             msg_com_tag = f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação e está *Ausente*."
-            enviar_para_slack(WEBHOOK_LIDERANCA, msg_com_tag)
+            enviar_para_slack(WEBHOOK_LIDERANCA, msg_com_tag, "Canal Liderança")
 
-            # MENSAGEM 2 (LIMPA) -> Vai para o Canal Geral
+            # 3. Envia Slack Geral
             msg_sem_tag = f"🔴 *{agent_name}* entrou em ligação e está *Ausente*."
-            enviar_para_slack(WEBHOOK_GERAL, msg_sem_tag)
+            enviar_para_slack(WEBHOOK_GERAL, msg_sem_tag, "Canal Geral")
+        else:
+            print(f"[{hora_atual()}] ❌ Falha ao mudar status no Intercom.")
 
-    # 2. DESLIGOU A LIGAÇÃO
     elif event_type == 'call.ended':
-        print(f"☎️ {agent_name} desligou.")
+        print(f"[{hora_atual()}] ☎️ {agent_name} DESLIGOU. Iniciando processos...")
         
+        # 1. Tenta mudar Intercom
         if set_intercom_status(admin_id, False):
-            # Aviso de volta (Online) geralmente não precisa marcar ninguém em nenhum canal
-            msg_online = f"🟢 *{agent_name}* finalizou a ligação e está *Online* novamente."
+            # LOG DE SUCESSO INTERCOM
+            print(f"[{hora_atual()}] ✅ Status Intercom alterado para: ONLINE")
             
-            enviar_para_slack(WEBHOOK_LIDERANCA, msg_online)
-            enviar_para_slack(WEBHOOK_GERAL, msg_online)
+            # 2. Envia Slack (Avisos de volta)
+            msg_online = f"🟢 *{agent_name}* finalizou a ligação e está *Online* novamente."
+            enviar_para_slack(WEBHOOK_LIDERANCA, msg_online, "Canal Liderança")
+            enviar_para_slack(WEBHOOK_GERAL, msg_online, "Canal Geral")
+        else:
+            print(f"[{hora_atual()}] ❌ Falha ao mudar status no Intercom.")
 
     return jsonify({"status": "success"}), 200
 
