@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-import json # Importado para ler o pacote de dados completo
+import json
 from datetime import datetime
 
 app = Flask(__name__)
@@ -20,7 +20,7 @@ AGENTS_MAP = {
     "heloisa.atm.slv@produttivo.com.br": "7455039",
     "danielle.ghesini@produttivo.com.br": "7628368",
     "jenyffer.souza@produttivo.com.br": "8115775",
-    "marcelo.misugi@produttivo.com.br": "8126602"
+    "marcelo.misugi@produttivo.com.br": "8126602",
 }
 
 def hora_atual():
@@ -58,20 +58,50 @@ def aircall_hook():
         return jsonify({"status": "ignored"}), 200
 
     event_type = data['event']
-    
-    # --- LOG DIAGNÓSTICO (IMPORTANTE) ---
-    # Isso vai imprimir no Render exatamente o que acontece numa transferência
-    if 'transfer' in event_type:
-        print(f"\n[{hora_atual()}] 🕵️ DETETIVE DE TRANSFERÊNCIA:")
-        print(json.dumps(data, indent=2))
-        print("-" * 30)
+    call_data = data.get('data', {})
 
-    user = data.get('data', {}).get('user')
-    
-    # Se não tiver user, tentamos achar nos campos de transferência (correção tentativa)
-    if not user and 'transferred_to' in str(data):
-         print(f"[{hora_atual()}] ⚠️ Evento de transferência detectado sem usuário padrão.")
+    # ---------------------------------------------------------
+    # CENÁRIO 1: TRANSFERÊNCIA (Lógica Especial)
+    # ---------------------------------------------------------
+    if event_type == 'call.transferred':
+        print(f"[{hora_atual()}] 🔀 TRANSFERÊNCIA DETECTADA!")
+        
+        # PARTE A: Quem transferiu (ex: Heloisa) -> Fica ONLINE
+        quem_transferiu = call_data.get('transferred_by')
+        if quem_transferiu:
+            email_by = quem_transferiu.get('email')
+            name_by = quem_transferiu.get('name', 'Agente')
+            id_by = AGENTS_MAP.get(email_by)
+            
+            if id_by:
+                if set_intercom_status(id_by, False): # False = Online
+                    print(f"[{hora_atual()}] ✅ {name_by} (Origem) voltou para ONLINE.")
+                    msg = f"🟢 *{name_by}* transferiu a chamada e ficou *Online*."
+                    enviar_para_slack(WEBHOOK_LIDERANCA, msg)
+                    enviar_para_slack(WEBHOOK_GERAL, msg)
+        
+        # PARTE B: Quem recebeu (ex: Aline) -> Fica AUSENTE
+        quem_recebeu = call_data.get('transferred_to')
+        if quem_recebeu:
+            email_to = quem_recebeu.get('email')
+            name_to = quem_recebeu.get('name', 'Agente')
+            id_to = AGENTS_MAP.get(email_to)
+            
+            if id_to:
+                if set_intercom_status(id_to, True): # True = Ausente
+                    print(f"[{hora_atual()}] ✅ {name_to} (Destino) mudou para AUSENTE.")
+                    msg_lider = f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*."
+                    msg_geral = f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*."
+                    enviar_para_slack(WEBHOOK_LIDERANCA, msg_lider)
+                    enviar_para_slack(WEBHOOK_GERAL, msg_geral)
 
+        return jsonify({"status": "success"}), 200
+
+    # ---------------------------------------------------------
+    # CENÁRIO 2: CHAMADA NORMAL (Atendeu / Desligou)
+    # ---------------------------------------------------------
+    
+    user = call_data.get('user')
     if not user: 
         return jsonify({"status": "ignored", "reason": "No agent data"}), 200
 
@@ -80,14 +110,8 @@ def aircall_hook():
     admin_id = AGENTS_MAP.get(agent_email)
 
     if not admin_id:
-        # Só imprime se for um evento relevante, pra não sujar o log
-        if event_type in ['call.answered', 'call.ended', 'call.transferred']:
-            print(f"[{hora_atual()}] 🚫 Agente não mapeado: {agent_email}")
         return jsonify({"status": "ignored"}), 200
 
-    # --- LÓGICA ATUALIZADA ---
-
-    # 1. ATENDEU (Normal)
     if event_type == 'call.answered':
         print(f"[{hora_atual()}] 📞 {agent_name} ATENDEU.")
         if set_intercom_status(admin_id, True):
@@ -96,22 +120,10 @@ def aircall_hook():
             enviar_para_slack(WEBHOOK_LIDERANCA, msg_tag)
             enviar_para_slack(WEBHOOK_GERAL, msg_geral)
 
-    # 2. DESLIGOU (Normal)
     elif event_type == 'call.ended':
         print(f"[{hora_atual()}] ☎️ {agent_name} DESLIGOU.")
         if set_intercom_status(admin_id, False):
             msg = f"🟢 *{agent_name}* finalizou e está Online."
-            enviar_para_slack(WEBHOOK_LIDERANCA, msg)
-            enviar_para_slack(WEBHOOK_GERAL, msg)
-
-    # 3. TRANSFERIU (Tentativa de Correção para Heloísa)
-    elif event_type == 'call.transferred':
-        print(f"[{hora_atual()}] 🔀 {agent_name} TRANSFERIU a chamada.")
-        
-        # Lógica: Quem transfere (Heloisa) sai da ligação, então fica ONLINE
-        if set_intercom_status(admin_id, False):
-            print(f"[{hora_atual()}] ✅ {agent_name} voltou para ONLINE após transferir.")
-            msg = f"🟢 *{agent_name}* transferiu a chamada e está Online."
             enviar_para_slack(WEBHOOK_LIDERANCA, msg)
             enviar_para_slack(WEBHOOK_GERAL, msg)
 
