@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 
@@ -17,14 +17,33 @@ AGENTS_MAP = {
     "rhayslla.junca@produttivo.com.br": "5281911",
     "douglas.david@produttivo.com.br": "5586698",
     "aline.souza@produttivo.com.br": "5717251",
-    "heloisa.atm.slv@produttivo.com.br": "7455039",
+    #"heloisa.atm.slv@produttivo.com.br": "7455039",
     "danielle.ghesini@produttivo.com.br": "7628368",
     "jenyffer.souza@produttivo.com.br": "8115775",
     "marcelo.misugi@produttivo.com.br": "8126602",
 }
 
+# Horários em que a automação DEVE alterar o status
+HORARIOS_AUTOMACAO = {
+    "heloisa.atm.slv@produttivo.com.br": ("08:00", "12:00") 
+}
+
 def hora_atual():
     return datetime.now().strftime("%H:%M:%S")
+
+def automacao_ativa_agora(email):
+    # Se a pessoa não tem restrição, roda o dia todo
+    if email not in HORARIOS_AUTOMACAO:
+        return True
+        
+    horario_inicio, horario_fim = HORARIOS_AUTOMACAO[email]
+    
+    # Descobre a hora exata agora no Brasil (Fuso -3)
+    fuso_br = timezone(timedelta(hours=-3))
+    hora_agora = datetime.now(fuso_br).strftime("%H:%M")
+    
+    # Confere se a hora de agora está dentro do turno configurado
+    return horario_inicio <= hora_agora <= horario_fim
 
 def set_intercom_status(admin_id, is_away):
     url = f"https://api.intercom.io/admins/{admin_id}/away"
@@ -74,11 +93,14 @@ def aircall_hook():
             id_by = AGENTS_MAP.get(email_by)
             
             if id_by:
-                if set_intercom_status(id_by, False): # False = Online
-                    print(f"[{hora_atual()}] ✅ {name_by} (Origem) voltou para ONLINE.")
-                    msg = f"🟢 *{name_by}* transferiu a chamada e ficou *Online*."
-                    enviar_para_slack(WEBHOOK_LIDERANCA, msg)
-                    enviar_para_slack(WEBHOOK_GERAL, msg)
+                if automacao_ativa_agora(email_by):
+                    if set_intercom_status(id_by, False):
+                        print(f"[{hora_atual()}] ✅ {name_by} (Origem) voltou para ONLINE.")
+                        msg = f"🟢 *{name_by}* transferiu a chamada e ficou *Online*."
+                        enviar_para_slack(WEBHOOK_LIDERANCA, msg)
+                        enviar_para_slack(WEBHOOK_GERAL, msg)
+                else:
+                    print(f"[{hora_atual()}] ⏳ Ignorado: {name_by} (Origem) está fora do turno de automação.")
         
         # PARTE B: Quem recebeu (ex: Aline) -> Fica AUSENTE
         quem_recebeu = call_data.get('transferred_to')
@@ -88,12 +110,15 @@ def aircall_hook():
             id_to = AGENTS_MAP.get(email_to)
             
             if id_to:
-                if set_intercom_status(id_to, True): # True = Ausente
-                    print(f"[{hora_atual()}] ✅ {name_to} (Destino) mudou para AUSENTE.")
-                    msg_lider = f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*."
-                    msg_geral = f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*."
-                    enviar_para_slack(WEBHOOK_LIDERANCA, msg_lider)
-                    enviar_para_slack(WEBHOOK_GERAL, msg_geral)
+                if automacao_ativa_agora(email_to):
+                    if set_intercom_status(id_to, True):
+                        print(f"[{hora_atual()}] ✅ {name_to} (Destino) mudou para AUSENTE.")
+                        msg_lider = f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*."
+                        msg_geral = f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*."
+                        enviar_para_slack(WEBHOOK_LIDERANCA, msg_lider)
+                        enviar_para_slack(WEBHOOK_GERAL, msg_geral)
+                else:
+                    print(f"[{hora_atual()}] ⏳ Ignorado: {name_to} (Destino) está fora do turno de automação.")
 
         return jsonify({"status": "success"}), 200
 
@@ -110,6 +135,11 @@ def aircall_hook():
     admin_id = AGENTS_MAP.get(agent_email)
 
     if not admin_id:
+        return jsonify({"status": "ignored"}), 200
+
+    # NOVA REGRA: Verifica o horário antes de continuar
+    if not automacao_ativa_agora(agent_email):
+        print(f"[{hora_atual()}] ⏳ Ignorado: {agent_name} está fora do turno de automação.")
         return jsonify({"status": "ignored"}), 200
 
     if event_type == 'call.answered':
