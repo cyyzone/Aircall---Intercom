@@ -69,12 +69,12 @@ def get_agents_map():
                     "fim": fim if fim else None
                 }
                 
-                # Adiciona novos agentes ao Dashboard automaticamente
+               # Adiciona novos agentes ao Dashboard automaticamente
                 if email not in STATUS_EM_TEMPO_REAL:
                     nome_inicial = email.split('.')[0].capitalize()
                     STATUS_EM_TEMPO_REAL[email] = {
                         "nome": nome_inicial,
-                        "status": "Online 🟢",
+                        "status": "Aguardando status... ⚪",
                         "inicio": None
                     }
         
@@ -236,6 +236,25 @@ def aircall_hook():
             enviar_para_slack(WEBHOOK_GERAL, msg)
 
     return jsonify({"status": "success"}), 200
+
+# ---------------------------------------------------------
+    # CENÁRIO 3: PAUSAS E STATUS MANUAL DO AIRCALL
+    # ---------------------------------------------------------
+    if event_type in ['user.opened', 'user.closed']:
+        # Em eventos de usuário o email vem direto no call_data
+        user_email = call_data.get('email')
+        user_name = call_data.get('name', 'Agente')
+        
+        if user_email in AGENTS_MAP:
+            if event_type == 'user.opened':
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Disponível 🟢", "inicio": None}
+                print(f"[{hora_atual()}] {user_name} ficou DISPONÍVEL no Aircall.")
+            
+            elif event_type == 'user.closed':
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Ausente (Pausa) 🟡", "inicio": None}
+                print(f"[{hora_atual()}] {user_name} ficou AUSENTE no Aircall.")
+                
+        return jsonify({"status": "success"}), 200
 
 # ==========================================
 # ROTA VISUAL: DASHBOARD
