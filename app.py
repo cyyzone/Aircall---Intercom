@@ -9,42 +9,38 @@ from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 
-# --- CONFIGURAÇÕES ---
+# CONFIGURACOES GERAIS
 INTERCOM_TOKEN = os.environ.get("INTERCOM_TOKEN")
 WEBHOOK_LIDERANCA = os.environ.get("SLACK_WEBHOOK_1")
 WEBHOOK_GERAL = os.environ.get("SLACK_WEBHOOK_2")
 
-# Credenciais seguras do Google
+# CREDENCIAIS SEGURAS DO GOOGLE
 GOOGLE_JSON_KEY = os.environ.get("GOOGLE_JSON_KEY")
 PLANILHA_ID = os.environ.get("PLANILHA_ID")
 
 LIDERANCA_TAGS = "<@U06KNLC1Y9F> <@U08CZ58DDAA>"
 
-# --- MEMÓRIAS DO SISTEMA ---
+# MEMORIAS DO SISTEMA
 CACHE_AGENTES = {}
 LAST_UPDATE = 0
-CACHE_TIMEOUT = 600  # Vai buscar novos dados na planilha a cada 10 minutos
+CACHE_TIMEOUT = 600
 STATUS_EM_TEMPO_REAL = {}
 
 def hora_atual():
     return datetime.now().strftime("%H:%M:%S")
 
-# ==========================================
-# INTEGRAÇÃO COM GOOGLE SHEETS E REGRAS
-# ==========================================
 def get_agents_map():
     global CACHE_AGENTES, LAST_UPDATE, STATUS_EM_TEMPO_REAL
     agora = time.time()
     
-    # Usa a memória se ainda estiver no prazo (rápido)
     if CACHE_AGENTES and (agora - LAST_UPDATE < CACHE_TIMEOUT):
         return CACHE_AGENTES
 
     if not GOOGLE_JSON_KEY or not PLANILHA_ID:
-        print(f"[{hora_atual()}] ⚠️ Credenciais do Google não configuradas.")
+        print(f"[{hora_atual()}] Aviso: Credenciais do Google nao configuradas.")
         return CACHE_AGENTES
 
-    print(f"[{hora_atual()}] 🔄 A ler dados da Planilha Google...")
+    print(f"[{hora_atual()}] A ler dados da Planilha Google...")
     
     try:
         credenciais_dict = json.loads(GOOGLE_JSON_KEY)
@@ -69,23 +65,23 @@ def get_agents_map():
                     "fim": fim if fim else None
                 }
                 
-               # Adiciona novos agentes ao Dashboard automaticamente
+                # Inicia todos como Aguardando status
                 if email not in STATUS_EM_TEMPO_REAL:
                     nome_inicial = email.split('.')[0].capitalize()
                     STATUS_EM_TEMPO_REAL[email] = {
                         "nome": nome_inicial,
-                        "status": "Aguardando status... ⚪",
+                        "status": "Aguardando status",
                         "inicio": None
                     }
         
         CACHE_AGENTES = novo_mapa
         LAST_UPDATE = agora
         
-        print(f"[{hora_atual()}] ✅ Planilha carregada: {len(CACHE_AGENTES)} agentes na automação.")
+        print(f"[{hora_atual()}] Planilha carregada: {len(CACHE_AGENTES)} agentes.")
         return CACHE_AGENTES
 
     except Exception as e:
-        print(f"[{hora_atual()}] ❌ Erro ao ler planilha: {e}")
+        print(f"[{hora_atual()}] Erro ao ler planilha: {e}")
         return CACHE_AGENTES
 
 def automacao_ativa_agora(email, agents_map):
@@ -96,19 +92,14 @@ def automacao_ativa_agora(email, agents_map):
     inicio = agente.get("inicio")
     fim = agente.get("fim")
     
-    # Se a planilha está em branco nestas colunas, roda o dia todo
     if not inicio or not fim:
         return True
         
-    # Verifica a hora no Brasil (Fuso -3)
     fuso_br = timezone(timedelta(hours=-3))
     hora_agora = datetime.now(fuso_br).strftime("%H:%M")
     
     return inicio <= hora_agora <= fim
 
-# ==========================================
-# FUNÇÕES DE COMUNICAÇÃO
-# ==========================================
 def set_intercom_status(admin_id, is_away):
     url = f"https://api.intercom.io/admins/{admin_id}/away"
     headers = {
@@ -123,7 +114,7 @@ def set_intercom_status(admin_id, is_away):
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
-        print(f"[{hora_atual()}] ❌ Erro Intercom: {e}")
+        print(f"[{hora_atual()}] Erro Intercom: {e}")
         return False
 
 def enviar_para_slack(url, mensagem):
@@ -131,11 +122,8 @@ def enviar_para_slack(url, mensagem):
     try:
         requests.post(url, json={"text": mensagem})
     except Exception as e:
-        print(f"[{hora_atual()}] ⚠️ Erro Slack: {e}")
+        print(f"[{hora_atual()}] Erro Slack: {e}")
 
-# ==========================================
-# ROTA PRINCIPAL: RECEBE A LIGAÇÃO
-# ==========================================
 @app.route('/webhook-aircall', methods=['POST'])
 def aircall_hook():
     data = request.json
@@ -143,19 +131,12 @@ def aircall_hook():
     if not data or 'event' not in data:
         return jsonify({"status": "ignored"}), 200
 
-    # Carrega ou usa o cache da planilha
     AGENTS_MAP = get_agents_map()
-
     event_type = data['event']
     call_data = data.get('data', {})
 
-    # ---------------------------------------------------------
-    # CENÁRIO 1: TRANSFERÊNCIA
-    # ---------------------------------------------------------
+    # 1. TRATA TRANSFERENCIAS
     if event_type == 'call.transferred':
-        print(f"[{hora_atual()}] 🔀 TRANSFERÊNCIA DETECTADA!")
-        
-        # PARTE A: Quem transferiu (Origem) -> Fica ONLINE
         quem_transferiu = call_data.get('transferred_by')
         if quem_transferiu:
             email_by = quem_transferiu.get('email')
@@ -163,18 +144,12 @@ def aircall_hook():
             dados_by = AGENTS_MAP.get(email_by)
             id_by = dados_by.get("id") if dados_by else None
             
-            if id_by:
-                if automacao_ativa_agora(email_by, AGENTS_MAP):
-                    if set_intercom_status(id_by, False):
-                        print(f"[{hora_atual()}] ✅ {name_by} (Origem) voltou para ONLINE.")
-                        STATUS_EM_TEMPO_REAL[email_by] = {"nome": name_by, "status": "Online 🟢", "inicio": None}
-                        msg = f"🟢 *{name_by}* transferiu a chamada e ficou *Online*."
-                        enviar_para_slack(WEBHOOK_LIDERANCA, msg)
-                        enviar_para_slack(WEBHOOK_GERAL, msg)
-                else:
-                    print(f"[{hora_atual()}] ⏳ Ignorado: {name_by} fora do turno de automação.")
+            if id_by and automacao_ativa_agora(email_by, AGENTS_MAP):
+                if set_intercom_status(id_by, False):
+                    STATUS_EM_TEMPO_REAL[email_by] = {"nome": name_by, "status": "Disponivel", "inicio": None}
+                    enviar_para_slack(WEBHOOK_LIDERANCA, f"*{name_by}* transferiu a chamada e ficou *Online*.")
+                    enviar_para_slack(WEBHOOK_GERAL, f"*{name_by}* transferiu a chamada e ficou *Online*.")
         
-        # PARTE B: Quem recebeu (Destino) -> Fica AUSENTE
         quem_recebeu = call_data.get('transferred_to')
         if quem_recebeu:
             email_to = quem_recebeu.get('email')
@@ -182,23 +157,31 @@ def aircall_hook():
             dados_to = AGENTS_MAP.get(email_to)
             id_to = dados_to.get("id") if dados_to else None
             
-            if id_to:
-                if automacao_ativa_agora(email_to, AGENTS_MAP):
-                    if set_intercom_status(id_to, True):
-                        print(f"[{hora_atual()}] ✅ {name_to} (Destino) mudou para AUSENTE.")
-                        STATUS_EM_TEMPO_REAL[email_to] = {"nome": name_to, "status": "Em Ligação 🔴", "inicio": datetime.now()}
-                        msg_lider = f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*."
-                        msg_geral = f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*."
-                        enviar_para_slack(WEBHOOK_LIDERANCA, msg_lider)
-                        enviar_para_slack(WEBHOOK_GERAL, msg_geral)
-                else:
-                    print(f"[{hora_atual()}] ⏳ Ignorado: {name_to} fora do turno de automação.")
+            if id_to and automacao_ativa_agora(email_to, AGENTS_MAP):
+                if set_intercom_status(id_to, True):
+                    STATUS_EM_TEMPO_REAL[email_to] = {"nome": name_to, "status": "Em Ligacao", "inicio": datetime.now()}
+                    enviar_para_slack(WEBHOOK_LIDERANCA, f"{LIDERANCA_TAGS}: *{name_to}* recebeu transferencia e ficou *Ausente*.")
+                    enviar_para_slack(WEBHOOK_GERAL, f"*{name_to}* recebeu transferencia e ficou *Ausente*.")
 
         return jsonify({"status": "success"}), 200
 
-    # ---------------------------------------------------------
-    # CENÁRIO 2: CHAMADA NORMAL
-    # ---------------------------------------------------------
+    # 2. TRATA MUDANCAS DE STATUS (PAUSA E DISPONIVEL)
+    if event_type in ['user.opened', 'user.closed']:
+        user_email = call_data.get('email')
+        user_name = call_data.get('name', 'Agente')
+        
+        if user_email in AGENTS_MAP:
+            if event_type == 'user.opened':
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Disponivel", "inicio": None}
+                print(f"[{hora_atual()}] {user_name} ficou DISPONIVEL.")
+            
+            elif event_type == 'user.closed':
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Ausente (Pausa)", "inicio": None}
+                print(f"[{hora_atual()}] {user_name} ficou AUSENTE.")
+                
+        return jsonify({"status": "success"}), 200
+
+    # 3. TRATA CHAMADAS NORMAIS
     user = call_data.get('user')
     if not user: 
         return jsonify({"status": "ignored", "reason": "No agent data"}), 200
@@ -209,65 +192,33 @@ def aircall_hook():
     dados_agente = AGENTS_MAP.get(agent_email)
     admin_id = dados_agente.get("id") if dados_agente else None
 
-    if not admin_id:
-        return jsonify({"status": "ignored"}), 200
-
-    if not automacao_ativa_agora(agent_email, AGENTS_MAP):
-        print(f"[{hora_atual()}] ⏳ Ignorado: {agent_name} está fora do turno de automação.")
+    if not admin_id or not automacao_ativa_agora(agent_email, AGENTS_MAP):
         return jsonify({"status": "ignored"}), 200
 
     if event_type == 'call.answered':
-        print(f"[{hora_atual()}] 📞 {agent_name} ATENDEU.")
-        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Em Ligação 🔴", "inicio": datetime.now()}
+        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Em Ligacao", "inicio": datetime.now()}
 
         if set_intercom_status(admin_id, True):
-            msg_tag = f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação (Ausente)."
-            msg_geral = f"🔴 *{agent_name}* entrou em ligação (Ausente)."
-            enviar_para_slack(WEBHOOK_LIDERANCA, msg_tag)
-            enviar_para_slack(WEBHOOK_GERAL, msg_geral)
+            enviar_para_slack(WEBHOOK_LIDERANCA, f"{LIDERANCA_TAGS}: *{agent_name}* entrou em ligacao (Ausente).")
+            enviar_para_slack(WEBHOOK_GERAL, f"*{agent_name}* entrou em ligacao (Ausente).")
 
     elif event_type == 'call.ended':
-        print(f"[{hora_atual()}] ☎️ {agent_name} DESLIGOU.")
-        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Online 🟢", "inicio": None}
+        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Disponivel", "inicio": None}
 
         if set_intercom_status(admin_id, False):
-            msg = f"🟢 *{agent_name}* finalizou e está Online."
-            enviar_para_slack(WEBHOOK_LIDERANCA, msg)
-            enviar_para_slack(WEBHOOK_GERAL, msg)
+            enviar_para_slack(WEBHOOK_LIDERANCA, f"*{agent_name}* finalizou e esta Online.")
+            enviar_para_slack(WEBHOOK_GERAL, f"*{agent_name}* finalizou e esta Online.")
 
     return jsonify({"status": "success"}), 200
 
-# ---------------------------------------------------------
-    # CENÁRIO 3: PAUSAS E STATUS MANUAL DO AIRCALL
-    # ---------------------------------------------------------
-    if event_type in ['user.opened', 'user.closed']:
-        # Em eventos de usuário o email vem direto no call_data
-        user_email = call_data.get('email')
-        user_name = call_data.get('name', 'Agente')
-        
-        if user_email in AGENTS_MAP:
-            if event_type == 'user.opened':
-                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Disponível 🟢", "inicio": None}
-                print(f"[{hora_atual()}] {user_name} ficou DISPONÍVEL no Aircall.")
-            
-            elif event_type == 'user.closed':
-                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Ausente (Pausa) 🟡", "inicio": None}
-                print(f"[{hora_atual()}] {user_name} ficou AUSENTE no Aircall.")
-                
-        return jsonify({"status": "success"}), 200
-
-# ==========================================
-# ROTA VISUAL: DASHBOARD
-# ==========================================
 @app.route('/status', methods=['GET'])
 def painel_visual():
-    # Atualiza a lista caso alguém acesse o painel antes de qualquer ligação
     get_agents_map()
     
     html = """
     <html>
         <head>
-            <title>Monitor de Operação</title>
+            <title>Monitor de Operacao</title>
             <meta http-equiv="refresh" content="5"> 
             <style>
                 body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; }
@@ -277,13 +228,13 @@ def painel_visual():
             </style>
         </head>
         <body>
-            <h2>📊 Painel de Atendimento (Aircall &harr; Intercom)</h2>
+            <h2>Painel de Atendimento</h2>
             <p>Atualizado automaticamente a cada 5 segundos.</p>
             <table>
                 <tr>
                     <th>Nome do Agente</th>
                     <th>Status Atual</th>
-                    <th>Tempo na Ligação</th>
+                    <th>Tempo na Ligacao</th>
                 </tr>
     """
 
@@ -294,7 +245,7 @@ def painel_visual():
 
         tempo_texto = "-"
         
-        if status == "Em Ligação 🔴" and inicio:
+        if status == "Em Ligacao" and inicio:
             tempo_ligacao = datetime.now() - inicio
             minutos, segundos = divmod(tempo_ligacao.seconds, 60)
             tempo_texto = f"{minutos}m {segundos}s"
