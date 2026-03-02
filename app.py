@@ -37,7 +37,7 @@ def get_agents_map():
         return CACHE_AGENTES
 
     if not GOOGLE_JSON_KEY or not PLANILHA_ID:
-        print(f"[{hora_atual()}] Aviso: Credenciais do Google nao configuradas.")
+        print(f"[{hora_atual()}] Aviso: Credenciais do Google não configuradas.")
         return CACHE_AGENTES
 
     print(f"[{hora_atual()}] A ler dados da Planilha Google...")
@@ -70,7 +70,7 @@ def get_agents_map():
                     nome_inicial = email.split('.')[0].capitalize()
                     STATUS_EM_TEMPO_REAL[email] = {
                         "nome": nome_inicial,
-                        "status": "Aguardando status",
+                        "status": "Aguardando status ⚪",
                         "inicio": None
                     }
         
@@ -146,9 +146,9 @@ def aircall_hook():
             
             if id_by and automacao_ativa_agora(email_by, AGENTS_MAP):
                 if set_intercom_status(id_by, False):
-                    STATUS_EM_TEMPO_REAL[email_by] = {"nome": name_by, "status": "Disponivel", "inicio": None}
-                    enviar_para_slack(WEBHOOK_LIDERANCA, f"*{name_by}* transferiu a chamada e ficou *Online*.")
-                    enviar_para_slack(WEBHOOK_GERAL, f"*{name_by}* transferiu a chamada e ficou *Online*.")
+                    STATUS_EM_TEMPO_REAL[email_by] = {"nome": name_by, "status": "Disponível 🟢", "inicio": None}
+                    enviar_para_slack(WEBHOOK_LIDERANCA, f"🟢 *{name_by}* transferiu a chamada e ficou *Online*.")
+                    enviar_para_slack(WEBHOOK_GERAL, f"🟢 *{name_by}* transferiu a chamada e ficou *Online*.")
         
         quem_recebeu = call_data.get('transferred_to')
         if quem_recebeu:
@@ -159,9 +159,9 @@ def aircall_hook():
             
             if id_to and automacao_ativa_agora(email_to, AGENTS_MAP):
                 if set_intercom_status(id_to, True):
-                    STATUS_EM_TEMPO_REAL[email_to] = {"nome": name_to, "status": "Em Ligacao", "inicio": datetime.now()}
-                    enviar_para_slack(WEBHOOK_LIDERANCA, f"{LIDERANCA_TAGS}: *{name_to}* recebeu transferencia e ficou *Ausente*.")
-                    enviar_para_slack(WEBHOOK_GERAL, f"*{name_to}* recebeu transferencia e ficou *Ausente*.")
+                    STATUS_EM_TEMPO_REAL[email_to] = {"nome": name_to, "status": "Em Ligação 🔴", "inicio": datetime.now()}
+                    enviar_para_slack(WEBHOOK_LIDERANCA, f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*.")
+                    enviar_para_slack(WEBHOOK_GERAL, f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*.")
 
         return jsonify({"status": "success"}), 200
 
@@ -172,11 +172,11 @@ def aircall_hook():
         
         if user_email in AGENTS_MAP:
             if event_type == 'user.opened':
-                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Disponivel", "inicio": None}
-                print(f"[{hora_atual()}] {user_name} ficou DISPONIVEL.")
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Disponível 🟢", "inicio": None}
+                print(f"[{hora_atual()}] {user_name} ficou DISPONÍVEL.")
             
             elif event_type == 'user.closed':
-                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Ausente (Pausa)", "inicio": None}
+                STATUS_EM_TEMPO_REAL[user_email] = {"nome": user_name, "status": "Ausente (Pausa) 🟡", "inicio": None}
                 print(f"[{hora_atual()}] {user_name} ficou AUSENTE.")
                 
         return jsonify({"status": "success"}), 200
@@ -196,18 +196,18 @@ def aircall_hook():
         return jsonify({"status": "ignored"}), 200
 
     if event_type == 'call.answered':
-        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Em Ligacao", "inicio": datetime.now()}
+        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Em Ligação 🔴", "inicio": datetime.now()}
 
         if set_intercom_status(admin_id, True):
-            enviar_para_slack(WEBHOOK_LIDERANCA, f"{LIDERANCA_TAGS}: *{agent_name}* entrou em ligacao (Ausente).")
-            enviar_para_slack(WEBHOOK_GERAL, f"*{agent_name}* entrou em ligacao (Ausente).")
+            enviar_para_slack(WEBHOOK_LIDERANCA, f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação (Ausente).")
+            enviar_para_slack(WEBHOOK_GERAL, f"🔴 *{agent_name}* entrou em ligação (Ausente).")
 
     elif event_type == 'call.ended':
-        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Disponivel", "inicio": None}
+        STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Disponível 🟢", "inicio": None}
 
         if set_intercom_status(admin_id, False):
-            enviar_para_slack(WEBHOOK_LIDERANCA, f"*{agent_name}* finalizou e esta Online.")
-            enviar_para_slack(WEBHOOK_GERAL, f"*{agent_name}* finalizou e esta Online.")
+            enviar_para_slack(WEBHOOK_LIDERANCA, f"🟢 *{agent_name}* finalizou e está Online.")
+            enviar_para_slack(WEBHOOK_GERAL, f"🟢 *{agent_name}* finalizou e está Online.")
 
     return jsonify({"status": "success"}), 200
 
@@ -218,7 +218,7 @@ def painel_visual():
     html = """
     <html>
         <head>
-            <title>Monitor de Operacao</title>
+            <title>Monitor de Operação</title>
             <meta http-equiv="refresh" content="5"> 
             <style>
                 body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; }
@@ -234,7 +234,7 @@ def painel_visual():
                 <tr>
                     <th>Nome do Agente</th>
                     <th>Status Atual</th>
-                    <th>Tempo na Ligacao</th>
+                    <th>Tempo na Ligação</th>
                 </tr>
     """
 
@@ -245,7 +245,7 @@ def painel_visual():
 
         tempo_texto = "-"
         
-        if status == "Em Ligacao" and inicio:
+        if status == "Em Ligação 🔴" and inicio:
             tempo_ligacao = datetime.now() - inicio
             minutos, segundos = divmod(tempo_ligacao.seconds, 60)
             tempo_texto = f"{minutos}m {segundos}s"
