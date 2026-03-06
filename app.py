@@ -146,6 +146,9 @@ def aircall_hook():
             
             if id_by and automacao_ativa_agora(email_by, AGENTS_MAP):
                 if set_intercom_status(id_by, False):
+                    # Adicionamos o log de quem transferiu aqui
+                    print(f"[{hora_atual()}] {name_by} transferiu a chamada e ficou Online no Intercom.")
+                    
                     STATUS_EM_TEMPO_REAL[email_by] = {"nome": name_by, "status": "Disponível 🟢", "inicio": None}
                     enviar_para_slack(WEBHOOK_LIDERANCA, f"🟢 *{name_by}* transferiu a chamada e ficou *Online*.")
                     enviar_para_slack(WEBHOOK_GERAL, f"🟢 *{name_by}* transferiu a chamada e ficou *Online*.")
@@ -159,6 +162,9 @@ def aircall_hook():
             
             if id_to and automacao_ativa_agora(email_to, AGENTS_MAP):
                 if set_intercom_status(id_to, True):
+                    # Adicionamos o log de quem recebeu a transferencia aqui
+                    print(f"[{hora_atual()}] {name_to} recebeu transferência e ficou Ausente no Intercom.")
+                    
                     STATUS_EM_TEMPO_REAL[email_to] = {"nome": name_to, "status": "Em Ligação 🔴", "inicio": datetime.now()}
                     enviar_para_slack(WEBHOOK_LIDERANCA, f"🔴 {LIDERANCA_TAGS}: *{name_to}* recebeu transferência e ficou *Ausente*.")
                     enviar_para_slack(WEBHOOK_GERAL, f"🔴 *{name_to}* recebeu transferência e ficou *Ausente*.")
@@ -199,6 +205,9 @@ def aircall_hook():
         STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Em Ligação 🔴", "inicio": datetime.now()}
 
         if set_intercom_status(admin_id, True):
+            # NOVO LOG ADICIONADO AQUI
+            print(f"[{hora_atual()}] {agent_name} atendeu a ligação e ficou Ausente no Intercom.")
+            
             enviar_para_slack(WEBHOOK_LIDERANCA, f"🔴 {LIDERANCA_TAGS}: *{agent_name}* entrou em ligação (Ausente).")
             enviar_para_slack(WEBHOOK_GERAL, f"🔴 *{agent_name}* entrou em ligação (Ausente).")
 
@@ -206,6 +215,9 @@ def aircall_hook():
         STATUS_EM_TEMPO_REAL[agent_email] = {"nome": agent_name, "status": "Disponível 🟢", "inicio": None}
 
         if set_intercom_status(admin_id, False):
+            # NOVO LOG ADICIONADO AQUI
+            print(f"[{hora_atual()}] {agent_name} desligou a ligação e ficou Online no Intercom.")
+            
             enviar_para_slack(WEBHOOK_LIDERANCA, f"🟢 *{agent_name}* finalizou e está Online.")
             enviar_para_slack(WEBHOOK_GERAL, f"🟢 *{agent_name}* finalizou e está Online.")
 
