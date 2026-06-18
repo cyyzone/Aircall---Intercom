@@ -43,11 +43,9 @@ def get_agents_map():
     print(f"[{hora_atual()}] A ler dados da Planilha Google...")
     
     try:
-        # Limpa espaços extras e arruma as quebras de linha do servidor
         chave_texto = str(GOOGLE_JSON_KEY).strip()
-        chave_texto = chave_texto.replace('\\n', '\n')
         
-        credenciais_dict = json.loads(chave_texto)
+        credenciais_dict = json.loads(chave_texto, strict=False)
         escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
         credenciais = Credentials.from_service_account_info(credenciais_dict, scopes=escopos)
         cliente = gspread.authorize(credenciais)
