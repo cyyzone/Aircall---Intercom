@@ -43,7 +43,11 @@ def get_agents_map():
     print(f"[{hora_atual()}] A ler dados da Planilha Google...")
     
     try:
-        credenciais_dict = json.loads(GOOGLE_JSON_KEY)
+        # Limpa espaços extras e arruma as quebras de linha do servidor
+        chave_texto = str(GOOGLE_JSON_KEY).strip()
+        chave_texto = chave_texto.replace('\\n', '\n')
+        
+        credenciais_dict = json.loads(chave_texto)
         escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
         credenciais = Credentials.from_service_account_info(credenciais_dict, scopes=escopos)
         cliente = gspread.authorize(credenciais)
@@ -65,7 +69,6 @@ def get_agents_map():
                     "fim": fim if fim else None
                 }
                 
-                # Inicia todos como Aguardando status
                 if email not in STATUS_EM_TEMPO_REAL:
                     nome_inicial = email.split('.')[0].capitalize()
                     STATUS_EM_TEMPO_REAL[email] = {
@@ -81,7 +84,7 @@ def get_agents_map():
         return CACHE_AGENTES
 
     except Exception as e:
-        print(f"[{hora_atual()}] Erro ao ler planilha: {e}")
+        print(f"[{hora_atual()}] Erro ao ler planilha: {str(e)}")
         return CACHE_AGENTES
 
 def automacao_ativa_agora(email, agents_map):
